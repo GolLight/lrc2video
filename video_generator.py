@@ -57,9 +57,6 @@ def generate_video(title, lrc_entries, audio_file, output_file, video_size=(1280
         end = min(end if end else duration, duration)  # 处理结束时间
         
         duration_clip = end - start
-        # 为了唱歌方便，歌词都提前1秒
-        start = start - 1
-        duration = duration - 1
         
         if duration_clip <= 0:
             continue
