@@ -1,87 +1,130 @@
 import os
-
 from moviepy.video.VideoClip import ColorClip, TextClip, ImageClip
 from moviepy.audio.io.AudioFileClip import AudioFileClip
+from moviepy.video.io import ImageSequenceClip
 from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
-from moviepy import vfx, afx
-
+from moviepy import vfx
 
 def generate_video(title, lrc_entries, audio_file, output_file, video_size=(1280,720),
-                    fps=24, bg_color=(0,0,0)):
+                   fps=24, bg_color=(0,0,0)):
     """
-    根据 lrc 歌词条目和音频文件生成动态歌词视频。
-
-    参数：
-    - title 视频开始标题
-    - lrc_entries: 列表，每个元素为 (start_time, end_time, lyric)
-    - audio_file: wav 音频文件路径
-    - output_file: 输出视频文件路径
-    - video_size: 视频分辨率，默认 1280x720
-    - fps: 帧率，默认 24
-    - bg_color: 背景颜色，默认黑色
+    根据 lrc 歌词条目和音频文件生成动态歌词视频
+    
+    参数优化：
+    - 增加标题安全处理：当无歌词时显示完整标题
+    - 优化歌词滚动动画参数
+    - 修复颜色参数拼写错误
     """
     # 加载音频文件
     audio_clip = AudioFileClip(audio_file)
     duration = audio_clip.duration
     
-    # 创建背景视频（纯色）
-    # background = ColorClip(size=video_size, color=bg_color, duration=duration)
-
-    # 创建背景视频（图片）
-    background = ImageClip("songs/test1.jpg").with_duration(duration)
-    
-    # 创建歌词文本剪辑列表
+    # 创建背景（优先使用图片，不存在时使用纯色背景）
+    # image_dir = "songs/image"
+    # image_files = sorted([os.path.join(image_dir, f) for f in os.listdir(image_dir)])
+    # print(image_files)
+    # per_image_duration = 2  #TODO 每张图片显示2秒
+    if os.path.exists("songs/image/test1.jpg"):
+        background = ImageClip("songs/image/test1.jpg").with_duration(duration).resized(video_size)
+        # background = ImageSequenceClip(sequence=image_files, durations=[per_image_duration]*len(image_files))
+        # background = background.loop(duration=duration)
+    else:
+        background = ColorClip(size=video_size, color=bg_color, duration=duration)
+        
+    # 标题处理逻辑优化
     text_clips = []
-    print(lrc_entries[0])
-    title_duration = lrc_entries[0][0] - 1;
-    if title_duration < 0:
-        title_duration = 0;
-    txt_clip = TextClip(text=title, font_size=200, color='orange', font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc')
-    txt_clip = txt_clip.with_position('center').with_start(0).with_duration(lrc_entries[0][0])
-    for start, end, lyric in lrc_entries:
-        # 如果 end 为 None 或超出音频总时长，则设置为总时长
-        if end is None or end > duration:
-            end = duration
+    if title:
+        title_duration = 3  # 固定标题显示3秒
+        if lrc_entries:
+            title_duration = min(lrc_entries[0][0], 10)  # 取歌词出现时间和3秒的最小值
+            
+        txt_clip = TextClip(
+            text=title, 
+            font_size=70, 
+            color='orange',
+            font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc',
+            stroke_color='black', 
+            stroke_width=1
+        ).with_position('center').with_duration(title_duration)
+        text_clips.append(txt_clip)
+
+    # 歌词处理优化
+    for idx, (start, end, lyric) in enumerate(lrc_entries):
+        end = min(end if end else duration, duration)  # 处理结束时间
         duration_clip = end - start
+        
         if duration_clip <= 0:
             continue
-        # 创建文本剪辑（可根据需要调整 fontsize、color、font 等参数）
-        # txt_clip = TextClip(text=lyric, font_size=50, color='blue', font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc')
-        # txt_clip = txt_clip.with_position('center').with_start(start).with_duration(duration_clip)
+
+        if start >= duration:
+            continue
+
+        # 创建带特效的歌词文本
+        txt_clip = TextClip(
+            text=lyric,
+            font_size=60,
+            color='blue',  # 修正颜色拼写
+            font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc',
+            stroke_color='white',
+            stroke_width=1
+        )
         
-        try:
-            # 带阴影的文字（参考网页5特效）
-            txt_clip = TextClip(text=lyric, font_size=100, color='bule', 
-                              font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc', 
-                              stroke_color='black', stroke_width=1)
-        except:
-            txt_clip = TextClip(text=lyric, font_size=100, color='blue', font='fonts/MoonStarsKaiTTC/MoonStarsKai-Regular.ttc')
-            
-        # 动态位置（参考网页2滚动逻辑）
-        txt_clip = (txt_clip.with_position(lambda t: ('center', 720 - 80*(t-start)))
+        # 优化动画参数：从底部到中部滚动
+        scroll_height = video_size[1] / 2  # 滚动到屏幕中部
+        scroll_speed = scroll_height / duration_clip  # 根据持续时间计算速度
+        
+        total_duration = duration_clip  # 歌词总时长
+        fall_duration = 2.0        # 下落动画持续时间（前2秒下落）
+        start_y = -txt_clip.h      # 初始Y位置（完全在屏幕上方外）
+        end_y = (video_size[1] - txt_clip.h) / 2  # 最终Y位置（垂直居中）
+# 动态位置函数
+        def position_func(t):
+    
+            if t < fall_duration:
+             # 下落阶段：二次缓动函数 (0->1)
+                progress = min(t / fall_duration, 1.0)
+                ease_progress = progress ** 0.5  # 缓出效果
+                current_y = start_y + (end_y - start_y) * ease_progress
+            else:
+                # 停留阶段
+                current_y = end_y
+            return ('center', current_y)
+        txt_clip = (txt_clip
                    .with_start(start)
                    .with_duration(duration_clip)
-                   .with_effects([vfx.FadeIn(3)])
-                    )   
-                #    .fx(vfx.fadein, 0.3))
-
-
+                #    .with_effects([vfx.FadeIn(0.5)])
+                   .with_position(position_func)
+                ) 
+        
+        print(lyric)
         text_clips.append(txt_clip)
-    
-    # # 叠加背景和歌词文本剪辑
-    # video = CompositeVideoClip([background] + text_clips)
-    # video = video.with_audio(audio_clip)
-    
-    # # 输出视频文件
-    # video.write_videofile(output_file, fps=fps)
 
-      # 合成视频（带内存优化）
+    # 合成视频（带内存优化）
     video = CompositeVideoClip([background] + text_clips, 
-                              use_bgclip=True).with_audio(audio_clip)
-    video.write_videofile(output_file, fps=fps, threads=4, 
-                        preset='fast', audio_codec='aac')
+                               use_bgclip=True).with_audio(audio_clip)
+    
+    # 优化输出参数
+    video.write_videofile(
+        output_file, 
+        fps=fps,
+        threads=4,
+        preset='fast',
+        audio_codec='aac',
+        ffmpeg_params=['-movflags', '+faststart']  # 支持流式播放
+    )
+
 
 if __name__ == '__main__':
-    # 示例调用（仅用于测试）
-    sample_entries = [(0, 5, "Hello World"), (5, 10, "动态歌词示例")]
-    generate_video(sample_entries, 'example.wav', 'output.mp4')
+    # 修正后的示例调用
+    sample_entries = [
+        (1, 4, "♪ 前奏音乐 ♪"),
+        (4, 8, "你好世界"),
+        (8, 12, "动态歌词示例"),
+        (12, 16, "电影py创作")
+    ]
+    generate_video(
+        title="示例歌曲",  # 添加标题参数
+        lrc_entries=sample_entries,
+        audio_file='example.wav',
+        output_file='output.mp4'
+    )
