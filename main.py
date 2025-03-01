@@ -2,6 +2,7 @@ import sys
 from lrc_parser import parse_lrc
 from video_generator import generate_video
 
+# python main.py "The truth that you leave-Haha Light"  "songs/lyrics/The truth that you leave-Haha Light.lrc" "songs/the truth that you leave.wav"  output/output.mp4
 def main():
     if len(sys.argv) < 4:
         print("用法: python main.py title <lrc_file> <wav_file> <output_video>")
